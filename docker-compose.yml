@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  macd-bot:
+    build: .
+    container_name: robinhood-macd-bot
+    restart: unless-stopped
+    volumes:
+      # Persist transaction logs
+      - ./transactions.json:/app/transactions.json
+      # Persist application logs
+      - ./logs:/app/logs
+    environment:
+      - TZ=America/New_York  # Set to your timezone
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

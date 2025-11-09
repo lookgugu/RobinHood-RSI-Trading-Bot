@@ -1,0 +1,21 @@
+[Unit]
+Description=Robinhood MACD Trading Bot
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/home/%i/RobinHood-RSI-Trading-Bot
+ExecStart=/usr/bin/python3 /home/%i/RobinHood-RSI-Trading-Bot/RobinhoodMACDBot.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/%i/RobinHood-RSI-Trading-Bot/logs/bot.log
+StandardError=append:/home/%i/RobinHood-RSI-Trading-Bot/logs/bot-error.log
+
+# Restart on failure
+StartLimitInterval=200
+StartLimitBurst=5
+
+[Install]
+WantedBy=multi-user.target

@@ -71,18 +71,38 @@ CONFIG = {
 
 ### Usage
 
-Run the bot:
+**Quick Start - Foreground:**
 ```bash
 python RobinhoodMACDBot.py
 ```
 
+**Run Continuously in Background (Recommended):**
+```bash
+# Make startup script executable
+chmod +x start_bot.sh
+
+# Run in background with auto-restart
+./start_bot.sh background
+
+# View logs
+tail -f logs/macd_bot_*.log
+```
+
+**For production deployment**, see **[DEPLOYMENT.md](DEPLOYMENT.md)** for complete guide on:
+- Systemd service (Linux) - auto-starts on boot
+- Docker container - isolated and portable
+- Screen/Tmux sessions - simple terminal management
+- Auto-restart on crashes
+- Monitoring and alerts
+
 The bot will:
 1. Login to Robinhood (prompts for 2FA if enabled)
 2. Display current configuration and trading summary
-3. Monitor the market every 5 minutes
+3. **Monitor MACD continuously** every 5 minutes (24/7 operation)
 4. Execute trades automatically based on MACD signals
 5. Exit positions at profit target or stop loss
 6. Log all transactions to `transactions.json`
+7. Save logs to `logs/` directory for monitoring
 
 ### Configuration Options
 
@@ -97,6 +117,8 @@ The bot will:
 | `macd_signal` | 9 | MACD signal line period |
 | `check_interval` | 300 | Seconds between checks |
 | `max_day_trades` | 3 | Max day trades in 5 days (PDT) |
+| `log_to_file` | True | Enable file logging for background operation |
+| `log_directory` | logs | Directory for log files |
 
 ### Recommended Symbols
 

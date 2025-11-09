@@ -19,6 +19,8 @@ import sched
 import time
 import json
 import os
+import sys
+import logging
 from collections import deque
 
 # Configuration
@@ -40,6 +42,8 @@ CONFIG = {
     'max_day_trades': 3,  # PDT rule: max 3 day trades in 5 trading days
     'use_profit_target': True,  # Enable profit target exit
     'use_stop_loss': True,  # Enable stop loss exit
+    'log_to_file': True,  # Enable file logging for background operation
+    'log_directory': 'logs',  # Directory for log files
 }
 
 class MACDTradingBot:
@@ -52,8 +56,54 @@ class MACDTradingBot:
         self.day_trades = deque(maxlen=100)  # Keep track of recent day trades
         self.scheduler = sched.scheduler(time.time, time.sleep)
 
+        # Setup logging
+        self.setup_logging()
+
         # Load existing transaction history
         self.load_transactions()
+
+    def setup_logging(self):
+        """Setup logging for file output or console"""
+        if self.config.get('log_to_file', False):
+            # Create logs directory if it doesn't exist
+            log_dir = self.config.get('log_directory', 'logs')
+            os.makedirs(log_dir, exist_ok=True)
+
+            # Setup file logging
+            log_file = os.path.join(log_dir, f"macd_bot_{datetime.now().strftime('%Y%m%d')}.log")
+            logging.basicConfig(
+                level=logging.INFO,
+                format='%(asctime)s - %(levelname)s - %(message)s',
+                handlers=[
+                    logging.FileHandler(log_file),
+                    logging.StreamHandler(sys.stdout)  # Also output to console
+                ]
+            )
+            logging.info("Logging initialized - output to file and console")
+        else:
+            # Console only
+            logging.basicConfig(
+                level=logging.INFO,
+                format='%(asctime)s - %(levelname)s - %(message)s',
+                handlers=[logging.StreamHandler(sys.stdout)]
+            )
+
+    def log(self, message, level='info'):
+        """Log a message with timestamp"""
+        timestamp = f"[{datetime.now()}]"
+        full_message = f"{timestamp} {message}"
+
+        # Use logging module
+        if level == 'error':
+            logging.error(message)
+        elif level == 'warning':
+            logging.warning(message)
+        else:
+            logging.info(message)
+
+        # Also print to console for immediate feedback
+        if not self.config.get('log_to_file', False):
+            print(full_message)
 
     def login(self):
         """Log in to Robinhood (will prompt for 2FA if enabled)"""
