@@ -1,0 +1,26 @@
+# Robinhood MACD Trading Bot - Python Dependencies
+
+# Robinhood API
+pyrh==2.0
+
+# Technical Analysis Libraries
+tulipy==0.4.0
+pandas==2.0.3
+numpy==1.24.3
+
+# Alternative: TA-Lib (technical analysis library)
+# Note: ta-lib requires system dependencies
+# ta-lib==0.4.28
+
+# Data handling
+python-dateutil==2.8.2
+
+# Optional: For more advanced technical indicators
+# ta==0.11.0
+
+# Optional: For data visualization (if you want to add charting)
+# matplotlib==3.7.2
+# plotly==5.16.1
+
+# Optional: For backtesting (future enhancement)
+# backtrader==1.9.78.123
