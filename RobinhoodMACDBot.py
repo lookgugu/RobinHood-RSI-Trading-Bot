@@ -21,7 +21,11 @@ import json
 import os
 import sys
 import logging
+from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
 from collections import deque
+import glob
+import gzip
+import shutil
 
 # Configuration
 CONFIG = {
@@ -42,8 +46,15 @@ CONFIG = {
     'max_day_trades': 3,  # PDT rule: max 3 day trades in 5 trading days
     'use_profit_target': True,  # Enable profit target exit
     'use_stop_loss': True,  # Enable stop loss exit
+
+    # Logging Configuration
     'log_to_file': True,  # Enable file logging for background operation
     'log_directory': 'logs',  # Directory for log files
+    'log_rotation_type': 'time',  # 'time' for daily rotation, 'size' for size-based
+    'log_max_bytes': 10 * 1024 * 1024,  # 10 MB per log file (for size rotation)
+    'log_backup_count': 30,  # Keep 30 backups (30 days for daily rotation)
+    'log_compress_archives': True,  # Compress old log files with gzip
+    'log_retention_days': 90,  # Delete logs older than 90 days
 }
 
 class MACDTradingBot:
@@ -63,23 +74,59 @@ class MACDTradingBot:
         self.load_transactions()
 
     def setup_logging(self):
-        """Setup logging for file output or console"""
+        """Setup logging with rotation, compression, and automatic cleanup"""
         if self.config.get('log_to_file', False):
             # Create logs directory if it doesn't exist
             log_dir = self.config.get('log_directory', 'logs')
             os.makedirs(log_dir, exist_ok=True)
 
-            # Setup file logging
-            log_file = os.path.join(log_dir, f"macd_bot_{datetime.now().strftime('%Y%m%d')}.log")
-            logging.basicConfig(
-                level=logging.INFO,
-                format='%(asctime)s - %(levelname)s - %(message)s',
-                handlers=[
-                    logging.FileHandler(log_file),
-                    logging.StreamHandler(sys.stdout)  # Also output to console
-                ]
-            )
+            # Determine log rotation type
+            rotation_type = self.config.get('log_rotation_type', 'time')
+            log_file = os.path.join(log_dir, 'macd_bot.log')
+
+            # Create appropriate handler based on rotation type
+            if rotation_type == 'size':
+                # Size-based rotation
+                handler = RotatingFileHandler(
+                    log_file,
+                    maxBytes=self.config.get('log_max_bytes', 10 * 1024 * 1024),  # 10 MB default
+                    backupCount=self.config.get('log_backup_count', 30)
+                )
+            else:
+                # Time-based rotation (daily)
+                handler = TimedRotatingFileHandler(
+                    log_file,
+                    when='midnight',
+                    interval=1,
+                    backupCount=self.config.get('log_backup_count', 30),
+                    utc=False
+                )
+                # Set the suffix for rotated files
+                handler.suffix = '%Y%m%d'
+
+            # Set formatter
+            formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+
+            # Setup logger
+            logger = logging.getLogger()
+            logger.setLevel(logging.INFO)
+            logger.addHandler(handler)
+
+            # Also add console handler
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setFormatter(formatter)
+            logger.addHandler(console_handler)
+
             logging.info("Logging initialized - output to file and console")
+            logging.info(f"Log rotation: {rotation_type}, Backup count: {self.config.get('log_backup_count', 30)}")
+
+            # Run initial cleanup of old logs
+            self.cleanup_old_logs()
+
+            # Compress old uncompressed log files
+            if self.config.get('log_compress_archives', True):
+                self.compress_old_logs()
         else:
             # Console only
             logging.basicConfig(
@@ -87,6 +134,73 @@ class MACDTradingBot:
                 format='%(asctime)s - %(levelname)s - %(message)s',
                 handlers=[logging.StreamHandler(sys.stdout)]
             )
+
+    def compress_old_logs(self):
+        """Compress old log files that haven't been compressed yet"""
+        try:
+            log_dir = self.config.get('log_directory', 'logs')
+            # Find old log files (not the current one)
+            log_pattern = os.path.join(log_dir, 'macd_bot.log.*')
+            log_files = glob.glob(log_pattern)
+
+            for log_file in log_files:
+                # Skip if already compressed
+                if log_file.endswith('.gz'):
+                    continue
+
+                # Skip the current log file
+                if log_file.endswith('macd_bot.log'):
+                    continue
+
+                # Compress the file
+                with open(log_file, 'rb') as f_in:
+                    with gzip.open(f"{log_file}.gz", 'wb') as f_out:
+                        shutil.copyfileobj(f_in, f_out)
+
+                # Remove the uncompressed file
+                os.remove(log_file)
+                logging.info(f"Compressed old log: {os.path.basename(log_file)}")
+
+        except Exception as e:
+            logging.error(f"Error compressing logs: {e}")
+
+    def cleanup_old_logs(self):
+        """Delete log files older than retention period"""
+        try:
+            log_dir = self.config.get('log_directory', 'logs')
+            retention_days = self.config.get('log_retention_days', 90)
+
+            if retention_days <= 0:
+                return  # No cleanup if retention is 0 or negative
+
+            # Calculate cutoff time
+            cutoff_time = time.time() - (retention_days * 24 * 60 * 60)
+
+            # Find all log files
+            log_patterns = [
+                os.path.join(log_dir, 'macd_bot.log.*'),
+                os.path.join(log_dir, 'macd_bot_*.log*'),
+            ]
+
+            deleted_count = 0
+            for pattern in log_patterns:
+                for log_file in glob.glob(pattern):
+                    # Skip the current log file
+                    if log_file.endswith('macd_bot.log'):
+                        continue
+
+                    # Check file age
+                    file_mtime = os.path.getmtime(log_file)
+                    if file_mtime < cutoff_time:
+                        os.remove(log_file)
+                        deleted_count += 1
+                        logging.info(f"Deleted old log: {os.path.basename(log_file)}")
+
+            if deleted_count > 0:
+                logging.info(f"Cleaned up {deleted_count} old log files (older than {retention_days} days)")
+
+        except Exception as e:
+            logging.error(f"Error cleaning up old logs: {e}")
 
     def log(self, message, level='info'):
         """Log a message with timestamp"""

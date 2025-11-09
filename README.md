@@ -119,6 +119,36 @@ The bot will:
 | `max_day_trades` | 3 | Max day trades in 5 days (PDT) |
 | `log_to_file` | True | Enable file logging for background operation |
 | `log_directory` | logs | Directory for log files |
+| `log_rotation_type` | time | Log rotation: 'time' (daily) or 'size' |
+| `log_backup_count` | 30 | Number of backup logs to keep |
+| `log_compress_archives` | True | Compress old logs with gzip (saves 90% space) |
+| `log_retention_days` | 90 | Delete logs older than N days |
+
+### Log Management
+
+The bot includes **automatic log management** to prevent disk space issues:
+
+- **Automatic rotation**: Daily (or by size)
+- **Automatic compression**: Gzip old logs (saves ~90% space)
+- **Automatic cleanup**: Deletes logs older than 90 days
+- **Disk space**: ~6-18 MB for normal operation (90 days)
+
+**Quick commands:**
+```bash
+# List all logs with sizes
+./manage_logs.py list
+
+# Analyze disk usage
+./manage_logs.py analyze
+
+# View recent activity
+tail -f logs/macd_bot.log
+
+# Cleanup old logs
+./manage_logs.py cleanup --days 30
+```
+
+For complete log management guide, see **[LOG_MANAGEMENT.md](LOG_MANAGEMENT.md)**.
 
 ### Recommended Symbols
 
