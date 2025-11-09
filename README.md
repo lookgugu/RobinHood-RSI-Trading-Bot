@@ -29,9 +29,12 @@ A collection of automated trading bots for Robinhood using technical indicators.
 - **MACD Strategy**: Trades based on MACD crossover signals
 - **Profit Targets**: Automatically exits at 1% profit (configurable)
 - **Stop Loss**: Protects capital with -0.5% stop loss (configurable)
+- **Account Tracking**: Monitors actual buying power and portfolio value from Robinhood
+- **Position Verification**: Verifies ownership before selling to prevent errors
+- **Smart Position Sizing**: Uses minimum of max_investment and available buying power
 - **PDT Protection**: Enforces max 3 day trades in 5 trading days
 - **Transaction Logging**: Saves all trades to JSON file
-- **Real-time Monitoring**: Displays current P/L and position status
+- **Real-time Monitoring**: Displays current P/L, account balance, and position status
 - **Small Positions**: Invests < $20 per trade for risk management
 - **Volatile Assets**: Targets TQQQ (3x leveraged QQQ) by default
 
@@ -163,11 +166,13 @@ PDT Protection: Max 3 day trades in 5 trading days
 ============================================================
 [2025-11-09 10:30:15] TQQQ - Price: $65.50
 MACD: 0.1234 | Signal: 0.0987 | Histogram: 0.0247
+Account - Buying Power: $1523.45 | Portfolio: $2450.00 | Cash: $1523.45
 Position: NONE
 Day Trades: 0/3 (last 5 days)
 ============================================================
 
 [2025-11-09 10:30:15] 🔔 BULLISH CROSSOVER DETECTED!
+[2025-11-09 10:30:15] Calculated position: 3 shares = $19.65
 [2025-11-09 10:30:16] BUYING 3 shares of TQQQ at $65.50
 [2025-11-09 10:30:17] BUY ORDER PLACED: 3 shares @ $65.50 = $196.50
 
@@ -181,12 +186,14 @@ Day Trades: 0/3 (last 5 days)
 
 ### Safety Features
 
-1. **Position Limits**: Never invests more than configured max
-2. **PDT Protection**: Prevents violation of day trading rules
-3. **Stop Loss**: Limits losses to configured percentage
-4. **Profit Target**: Locks in gains automatically
-5. **Transaction Logging**: Complete audit trail
-6. **Error Handling**: Graceful failure on API errors
+1. **Buying Power Verification**: Checks actual account funds before placing orders
+2. **Position Verification**: Verifies ownership before selling to prevent errors
+3. **Position Limits**: Never invests more than configured max or available buying power
+4. **PDT Protection**: Prevents violation of day trading rules
+5. **Stop Loss**: Limits losses to configured percentage (0.5% per transaction)
+6. **Profit Target**: Locks in gains automatically (1% per transaction)
+7. **Transaction Logging**: Complete audit trail
+8. **Error Handling**: Graceful failure on API errors
 
 ### Risks and Disclaimers
 

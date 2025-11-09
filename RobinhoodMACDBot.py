@@ -68,6 +68,60 @@ class MACDTradingBot:
             print(f"[{datetime.now()}] Login failed: {e}")
             return False
 
+    def get_buying_power(self):
+        """Get available buying power from Robinhood account"""
+        try:
+            account_data = self.rh.get_account()
+            if account_data and 'buying_power' in account_data:
+                buying_power = float(account_data['buying_power'])
+                return buying_power
+            else:
+                print(f"[{datetime.now()}] Warning: Could not retrieve buying power")
+                return None
+        except Exception as e:
+            print(f"[{datetime.now()}] Error getting buying power: {e}")
+            return None
+
+    def get_account_info(self):
+        """Get account information including buying power and portfolio value"""
+        try:
+            account_data = self.rh.get_account()
+            if account_data:
+                info = {
+                    'buying_power': float(account_data.get('buying_power', 0)),
+                    'portfolio_value': float(account_data.get('portfolio_value', 0)),
+                    'cash': float(account_data.get('cash', 0)),
+                }
+                return info
+            return None
+        except Exception as e:
+            print(f"[{datetime.now()}] Error getting account info: {e}")
+            return None
+
+    def get_current_positions(self):
+        """Get current positions from Robinhood"""
+        try:
+            positions = self.rh.positions()
+            if positions and 'results' in positions:
+                holdings = {}
+                for position in positions['results']:
+                    quantity = float(position.get('quantity', 0))
+                    if quantity > 0:
+                        instrument_url = position.get('instrument')
+                        # Get instrument details to find symbol
+                        instrument = self.rh.get_url(instrument_url)
+                        if instrument:
+                            symbol = instrument.get('symbol')
+                            holdings[symbol] = {
+                                'quantity': quantity,
+                                'average_buy_price': float(position.get('average_buy_price', 0))
+                            }
+                return holdings
+            return {}
+        except Exception as e:
+            print(f"[{datetime.now()}] Error getting positions: {e}")
+            return {}
+
     def load_transactions(self):
         """Load transaction history from file"""
         if os.path.exists(self.config['transaction_log']):
@@ -205,13 +259,26 @@ class MACDTradingBot:
             print(f"[{datetime.now()}] Error fetching historical data: {e}")
             return None
 
-    def calculate_position_size(self, current_price):
-        """Calculate number of shares to buy based on max investment"""
+    def calculate_position_size(self, current_price, buying_power=None):
+        """Calculate number of shares to buy based on max investment and available buying power"""
         if current_price <= 0:
-            return 0
+            return 0, 0
 
-        max_shares = int(self.config['max_investment'] / current_price)
-        return max(1, max_shares)  # At least 1 share
+        # Determine the maximum amount to invest
+        max_to_invest = self.config['max_investment']
+
+        # If buying power is provided, use the minimum of max_investment and buying_power
+        if buying_power is not None:
+            max_to_invest = min(max_to_invest, buying_power)
+
+        # Calculate shares
+        max_shares = int(max_to_invest / current_price)
+        shares = max(1, max_shares) if max_to_invest >= current_price else 0
+
+        # Calculate actual investment amount
+        actual_investment = shares * current_price
+
+        return shares, actual_investment
 
     def place_buy_order(self, instrument, quantity, price):
         """Place a buy order"""
@@ -246,6 +313,21 @@ class MACDTradingBot:
     def place_sell_order(self, instrument, quantity, price):
         """Place a sell order"""
         try:
+            # Verify we own the position
+            positions = self.get_current_positions()
+            if self.config['symbol'] not in positions:
+                print(f"[{datetime.now()}] ERROR: No {self.config['symbol']} position found in account. Cannot sell.")
+                return False
+
+            owned_quantity = positions[self.config['symbol']]['quantity']
+            if owned_quantity < quantity:
+                print(f"[{datetime.now()}] WARNING: Trying to sell {quantity} shares but only own {owned_quantity}. Adjusting quantity.")
+                quantity = int(owned_quantity)
+
+            if quantity <= 0:
+                print(f"[{datetime.now()}] ERROR: No shares to sell.")
+                return False
+
             print(f"[{datetime.now()}] SELLING {quantity} shares of {self.config['symbol']} at ${price:.2f}")
 
             # Place the order
@@ -292,6 +374,10 @@ class MACDTradingBot:
     def run_strategy(self, sc):
         """Main trading strategy execution"""
         try:
+            # Get account info and buying power
+            account_info = self.get_account_info()
+            buying_power = account_info['buying_power'] if account_info else None
+
             # Get historical data
             data = self.get_historical_data()
             if not data or len(data['close_prices']) < self.config['macd_slow'] + self.config['macd_signal']:
@@ -318,6 +404,12 @@ class MACDTradingBot:
             print(f"\n{'='*60}")
             print(f"[{datetime.now()}] {self.config['symbol']} - Price: ${current_price:.2f}")
             print(f"MACD: {current_macd:.4f} | Signal: {current_signal:.4f} | Histogram: {current_histogram:.4f}")
+
+            # Display account info
+            if account_info:
+                print(f"Account - Buying Power: ${buying_power:.2f} | Portfolio: ${account_info['portfolio_value']:.2f} | Cash: ${account_info['cash']:.2f}")
+            else:
+                print(f"Account - Buying Power: N/A (using max investment: ${self.config['max_investment']})")
 
             # Display position and P/L
             if self.entered_trade and self.current_position:
@@ -351,12 +443,16 @@ class MACDTradingBot:
             # BUY SIGNAL: MACD crosses above signal line (bullish crossover)
             if prev_macd <= prev_signal and current_macd > current_signal and not self.entered_trade:
                 print(f"[{datetime.now()}] 🔔 BULLISH CROSSOVER DETECTED!")
-                quantity = self.calculate_position_size(current_price)
+                quantity, investment_amount = self.calculate_position_size(current_price, buying_power)
 
-                if quantity * current_price <= self.config['max_investment']:
-                    self.place_buy_order(instrument, quantity, current_price)
+                if quantity > 0:
+                    if buying_power is not None and investment_amount > buying_power:
+                        print(f"[{datetime.now()}] Insufficient buying power: ${buying_power:.2f} < ${investment_amount:.2f}")
+                    else:
+                        print(f"[{datetime.now()}] Calculated position: {quantity} shares = ${investment_amount:.2f}")
+                        self.place_buy_order(instrument, quantity, current_price)
                 else:
-                    print(f"[{datetime.now()}] Trade cost ${quantity * current_price:.2f} exceeds max investment ${self.config['max_investment']}")
+                    print(f"[{datetime.now()}] Insufficient funds to buy even 1 share at ${current_price:.2f}")
 
             # SELL SIGNAL: MACD crosses below signal line (bearish crossover)
             elif prev_macd >= prev_signal and current_macd < current_signal and self.entered_trade:
