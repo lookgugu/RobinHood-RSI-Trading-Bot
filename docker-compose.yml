@@ -1,0 +1,221 @@
+version: '3.8'
+
+services:
+  # Infrastructure Services
+  redis:
+    image: redis:7-alpine
+    container_name: trading-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: trading-postgres
+    environment:
+      POSTGRES_DB: trading_bot
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Application Services
+  gateway:
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    container_name: trading-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - SERVICE_NAME=gateway
+      - REDIS_URL=redis://redis:6379
+      - ROBINHOOD_USERNAME=${ROBINHOOD_USERNAME}
+      - ROBINHOOD_PASSWORD=${ROBINHOOD_PASSWORD}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  market-data:
+    build:
+      context: .
+      dockerfile: services/market-data/Dockerfile
+    container_name: trading-market-data
+    ports:
+      - "8001:8001"
+    environment:
+      - SERVICE_NAME=market-data
+      - REDIS_URL=redis://redis:6379
+      - GATEWAY_URL=http://gateway:8000
+      - SYMBOL=${SYMBOL:-TQQQ}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      - gateway
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  strategy-engine:
+    build:
+      context: .
+      dockerfile: services/strategy-engine/Dockerfile
+    container_name: trading-strategy-engine
+    ports:
+      - "8002:8002"
+    environment:
+      - SERVICE_NAME=strategy-engine
+      - REDIS_URL=redis://redis:6379
+      - MARKET_DATA_URL=http://market-data:8001
+      - SYMBOL=${SYMBOL:-TQQQ}
+      - RSI_PERIOD=${RSI_PERIOD:-14}
+      - RSI_OVERSOLD=${RSI_OVERSOLD:-30}
+      - RSI_OVERBOUGHT=${RSI_OVERBOUGHT:-70}
+      - MACD_FAST=${MACD_FAST:-12}
+      - MACD_SLOW=${MACD_SLOW:-26}
+      - MACD_SIGNAL=${MACD_SIGNAL:-9}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      - market-data
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  execution:
+    build:
+      context: .
+      dockerfile: services/execution/Dockerfile
+    container_name: trading-execution
+    ports:
+      - "8003:8003"
+    environment:
+      - SERVICE_NAME=execution
+      - REDIS_URL=redis://redis:6379
+      - GATEWAY_URL=http://gateway:8000
+      - RISK_SERVICE_URL=http://risk-management:8004
+      - COMPLIANCE_SERVICE_URL=http://compliance:8005
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      - gateway
+      - risk-management
+      - compliance
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  risk-management:
+    build:
+      context: .
+      dockerfile: services/risk-management/Dockerfile
+    container_name: trading-risk-management
+    ports:
+      - "8004:8004"
+    environment:
+      - SERVICE_NAME=risk-management
+      - REDIS_URL=redis://redis:6379
+      - MAX_INVESTMENT=${MAX_INVESTMENT:-20.00}
+      - PROFIT_TARGET_PCT=${PROFIT_TARGET_PCT:-1.0}
+      - STOP_LOSS_PCT=${STOP_LOSS_PCT:--0.5}
+      - MAX_POSITION_VALUE=${MAX_POSITION_VALUE:-100.00}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  compliance:
+    build:
+      context: .
+      dockerfile: services/compliance/Dockerfile
+    container_name: trading-compliance
+    ports:
+      - "8005:8005"
+    environment:
+      - SERVICE_NAME=compliance
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@postgres:5432/trading_bot
+      - PDT_TRACKING_DAYS=${PDT_TRACKING_DAYS:-5}
+      - MAX_DAY_TRADES=${MAX_DAY_TRADES:-3}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  portfolio:
+    build:
+      context: .
+      dockerfile: services/portfolio/Dockerfile
+    container_name: trading-portfolio
+    ports:
+      - "8006:8006"
+    environment:
+      - SERVICE_NAME=portfolio
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@postgres:5432/trading_bot
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  redis_data:
+  postgres_data:
+
+networks:
+  default:
+    name: trading-network
